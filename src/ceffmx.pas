@@ -808,36 +808,43 @@ procedure TCustomChromiumFMX.doOnPaint(const browser: ICefBrowser;
   const dirtyRects: PCefRectArray; const buffer: Pointer;
   width, height: Integer);
 var
-  src, dst: PByte;
-  offset, i, {j,} w, c: Integer;
+  wSrc : PByte;
+  wOffset, i, j, c : Integer;
+  wBitmapData: TBitmapData;
+  wColor: TAlphaColor;
+const
+  _BytesPercolor : integer = 4;
 begin
-  if csDestroying in ComponentState then Exit;
+  // Khalid : This is not fully optimized as the buffer returned by Chrome engine is not serialized, so need to loop
+  // on each pixel (well can optimize using memory copy but need to have the same pixel format for Chrom buffer and Firemonkey Tbitmap)
 
-  if (FBuffer <> nil) and (FBuffer.Width = Width) and (FBuffer.Height = Height) then
-//    begin
-//      Move(buffer^, StartLine^, vw * vh * 4);
-//      InvalidateRect(ClipRect);
-//    end;
-    with FBuffer do
-    for c := 0 to dirtyRectsCount - 1 do
-    begin
-      w := Width * 4;
-      offset := ((dirtyRects[c].y * Width) + dirtyRects[c].x) * 4;
-      src := @PByte(buffer)[offset];
-      dst := @PByte(StartLine)[offset];
-      offset := dirtyRects[c].width * 4;
-      for i := 0 to dirtyRects[c].height - 1 do
+  if (FBuffer = nil)  then
+    FBuffer := TBitmap.Create(Width, Height);
+
+  if (FBuffer.Width = Width) and (FBuffer.Height = Height) and (dirtyRectsCount > 0)  then
+  begin
+    FBuffer.Map(TMapAccess.ReadWrite, wBitmapData);    // Getting the bitmap data pointer
+    try
+      for c := 0 to dirtyRectsCount - 1 do       // for each rect
       begin
-//        for j := 0 to offset div 4 do
-//          PAlphaColorArray(dst)[j] := PAlphaColorArray(src)[j] or $FF000000;
-        System.Move(src^, dst^, offset);
-        Inc(dst, w);
-        Inc(src, w);
+        begin
+          for i := 0 to dirtyRects[c].height - 1 do   // loop on pixels
+          begin
+            for j := 0 to dirtyRects[c].width - 1 do
+            begin
+              wOffset := (((dirtyRects[c].y + i) * width) + dirtyRects[c].x + j) * _BytesPercolor; // calculate offset
+              wSrc := @PByte(buffer)[wOffset];
+              System.Move(wSrc^, wColor, _BytesPercolor);                          // move color value to firemonkey bitmap
+              wBitmapData.SetPixel(dirtyRects[c].x + j , dirtyRects[c].y + i, wColor);
+            end;
+          end;
+        end;
+        InvalidateRect(RectF(0,0,width,height));      // update
       end;
-      //InvalidateRect(ClipRect);
-      InvalidateRect(RectF(dirtyRects[c].x, dirtyRects[c].y,
-        dirtyRects[c].x + dirtyRects[c].width,  dirtyRects[c].y + dirtyRects[c].height));
+    finally
+      FBuffer.Unmap(wBitmapData);
     end;
+  end;
 end;
 
 procedure TCustomChromiumFMX.doOnPluginCrashed(const browser: ICefBrowser;
